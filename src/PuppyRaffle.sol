@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.7.6;
+pragma solidity ^0.7.6; //q why less than v8? ownable is set by default
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {Base64} from "lib/base64/base64.sol";
+import {Base64} from "lib/base64/base64.sol"; 
 
 /// @title PuppyRaffle
 /// @author PuppyLoveDAO
@@ -61,7 +61,7 @@ contract PuppyRaffle is ERC721, Ownable {
         entranceFee = _entranceFee;
         feeAddress = _feeAddress;
         raffleDuration = _raffleDuration;
-        raffleStartTime = block.timestamp;
+        raffleStartTime = block.timestamp;//possible issue cause the raffle is not started yet
 
         rarityToUri[COMMON_RARITY] = commonImageUri;
         rarityToUri[RARE_RARITY] = rareImageUri;
@@ -100,7 +100,7 @@ contract PuppyRaffle is ERC721, Ownable {
 
         payable(msg.sender).sendValue(entranceFee);//possible reentrancy
 
-        players[playerIndex] = address(0);
+        players[playerIndex] = address(0);//q why not delete,and what happens if player is chosen as winner
         emit RaffleRefunded(playerAddress);
     }
 
