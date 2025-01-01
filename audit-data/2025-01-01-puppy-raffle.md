@@ -104,12 +104,12 @@ Player - Participant of the raffle, has the power to enter the raffle with the `
 
 | Severity | Number of issues found |
 | -------- | ---------------------- |
-| High     | 3                      |
+| High     | 4                      |
 | Medium   | 4                      |
 | Low      | 1                      |
 | Gas      | 2                      |
 | Info     | 7                      |
-| Total    | 17                     |
+| Total    | 18                     |
 
 
 # Findings
@@ -248,6 +248,7 @@ Using on-chain values as randomness seed is a [well-documented attack vector](ht
 
 ### [H-3] Integer overflow of `PuppyRaffle::totalFees` loses fees 
 
+
 **Description:** In solidity versions prior to `0.8.0` integers were subject to integer overflows.
 
 ```javascript
@@ -339,6 +340,79 @@ Alternatively, if you want to use an older version of Solidity, you can use a li
 ```
 
 There are more attack vectors with that final require, so we recommend removing it regardless.
+
+### [H-4] `PuppyRaffle::refund` replaces an index with address(0) which can cause the function `PuppyRaffle::selectWinner` to always revert
+
+**Description:** `PuppyRaffle::refund` is supposed to refund a player and remove him from the current players. But instead, it replaces his index value with address(0) which is considered a valid value by solidity. This can cause a lot issues because the players array length is unchanged and address(0) is now considered a player.
+
+```javascript
+function refund(uint256 playerIndex) public {
+        address playerAddress = players[playerIndex];
+        require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
+        require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
+
+        payable(msg.sender).sendValue(entranceFee);
+
+        players[playerIndex] = address(0);
+        emit RaffleRefunded(playerAddress);
+    }
+```
+
+If a player refunds his position, the function PuppyRaffle::selectWinner will always revert. Because more than likely the following call will not work because the prizePool is based on a amount calculated by considering that that no player has refunded his position and exit the lottery. And it will try to send more tokens that what the contract has :
+
+```javascript
+uint256 totalAmountCollected = players.length * entranceFee;
+uint256 prizePool = (totalAmountCollected * 80) / 100;
+
+(bool success,) = winner.call{value: prizePool}("");
+require(success, "PuppyRaffle: Failed to send prize pool to winner");
+```
+
+However, even if this calls passes for some reason (maybe there are more native tokens than what the players have sent or because of the 80% ...). The call will thankfully still fail because of the following line that doesn't allow NFT minting to the zero address.
+
+```javascript
+ _safeMint(winner, tokenId);
+```
+
+**Impact:** The lottery is stopped, any call to the function `PuppyRaffle::selectWinner` will revert. There is no actual loss of funds for users as they can always refund and get their tokens back. However, the protocol is shut down and will lose all it's customers. A core functionality is broken, Impact is high.
+
+**Proof of Code:**
+
+<details>
+<summary>Code</summary>
+
+Place the following into `PuppyRaffleTest.t.sol`
+
+```javascript
+function testWinnerSelectionRevertsAfterExit() public playersEntered {
+        vm.warp(block.timestamp + duration + 1);
+        vm.roll(block.number + 1);
+        
+        // There are four winners. Winner is last slot
+        vm.prank(playerFour);
+        puppyRaffle.refund(3);
+
+        // reverts because out of Funds
+        vm.expectRevert();
+        puppyRaffle.selectWinner();
+
+        vm.deal(address(puppyRaffle), 10 ether);
+        vm.expectRevert("ERC721: mint to the zero address");
+        puppyRaffle.selectWinner();
+
+    }
+```
+
+</details>
+
+**Recommended Mitigation:** Delete the player index that has refunded.
+
+```diff
+-   players[playerIndex] = address(0);
+
++    players[playerIndex] = players[players.length - 1];
++    players.pop()
+```
 
 ## Medium
 
