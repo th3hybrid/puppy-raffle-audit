@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.7.6; //q why less than v8? ownable is set by default
+pragma solidity ^0.7.6; 
+//report-written use of floating pragma is bad
+//report-written also... why are you using 0.7???
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -21,11 +23,13 @@ contract PuppyRaffle is ERC721, Ownable {
     uint256 public immutable entranceFee;
 
     address[] public players;
+    //report-written this should be immutable
     uint256 public raffleDuration;
     uint256 public raffleStartTime;
     address public previousWinner;
 
     // We do some storage packing to save gas
+    //report-written check for zero address
     address public feeAddress;
     uint64 public totalFees = 0;
 
@@ -35,16 +39,19 @@ contract PuppyRaffle is ERC721, Ownable {
     mapping(uint256 => string) public rarityToName;
 
     // Stats for the common puppy (pug)
+    //report-written should be constant
     string private commonImageUri = "ipfs://QmSsYRx3LpDAb1GZQm7zZ1AuHZjfbPkD6J7s9r41xu1mf8";
     uint256 public constant COMMON_RARITY = 70;
     string private constant COMMON = "common";
 
     // Stats for the rare puppy (st. bernard)
+    //report-written should be constant
     string private rareImageUri = "ipfs://QmUPjADFGEKmfohdTaNcWhp7VGk26h5jXDA7v3VtTnTLcW";
     uint256 public constant RARE_RARITY = 25;
     string private constant RARE = "rare";
 
     // Stats for the legendary puppy (shiba inu)
+    //report-written should be constant
     string private legendaryImageUri = "ipfs://QmYx6GsYAKnNzZ9A6NvEKV9nf1VaDzJrqDR23Y8YSkebLU";
     uint256 public constant LEGENDARY_RARITY = 5;
     string private constant LEGENDARY = "legendary";
@@ -77,30 +84,39 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @notice duplicate entrants are not allowed
     /// @param newPlayers the list of players to enter the raffle
     function enterRaffle(address[] memory newPlayers) public payable {
+        //q what if players are 0?
+        //@audit no checks for that
         require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
         for (uint256 i = 0; i < newPlayers.length; i++) {
             players.push(newPlayers[i]);
         }
 
         // Check for duplicates
+        // @audit DoS 
+        //@report-written uint256 playersLength = players.length;
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
                 require(players[i] != players[j], "PuppyRaffle: Duplicate player");
             }
         }
+        //q if its an empty array, we will emit an event with an empty array? yes,unfortunately
         emit RaffleEnter(newPlayers);
     }
 
     /// @param playerIndex the index of the player to refund. You can find it externally by calling `getActivePlayerIndex`
     /// @dev This function will allow there to be blank spots in the array
     function refund(uint256 playerIndex) public {
+        //@audit MEV oppurtunity here
         address playerAddress = players[playerIndex];
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
         require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
 
-        payable(msg.sender).sendValue(entranceFee);//possible reentrancy
+        //written reentrancy
+        payable(msg.sender).sendValue(entranceFee);
 
-        players[playerIndex] = address(0);//q why not delete,and what happens if player is chosen as winner
+        //q why not delete,and what happens if player is chosen as winner
+        //@audit, definitely a problem if the player is chosen as the winner
+        players[playerIndex] = address(0);
         emit RaffleRefunded(playerAddress);
     }
 
@@ -113,6 +129,8 @@ contract PuppyRaffle is ERC721, Ownable {
                 return i;
             }
         }
+        //q what if the player is at index 0?
+        //@audit if the player is at index 0, it will return 0, which is the same as if the player is not in the array
         return 0;
     }
 
@@ -122,21 +140,36 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev we use a hash of on-chain data to generate the random numbers
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
+    // @audit what happens if blank user gets chosen as winner?
     function selectWinner() external {
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
+        //@report-written randomness
+        //fixes: chainlink VRF, oracles, oracles with commit reveal
         uint256 winnerIndex =
-            uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;//wrong rng
+            uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
-        uint256 totalAmountCollected = players.length * entranceFee; //possible error cause of refund and zero address
+        //@audit //possible error cause of refund and zero address
+        uint256 totalAmountCollected = players.length * entranceFee; 
+        //possible precision loss
         uint256 prizePool = (totalAmountCollected * 80) / 100;
         uint256 fee = (totalAmountCollected * 20) / 100;
+        //q possible arithmetic overflow, if the amouunt is larger than 2^64 - 1
+        // fixes: newer solidity version,bigger uints
+        //unsafe casting too
+        //@audit unsafe casting from uint256 to uint64
         totalFees = totalFees + uint64(fee);
 
+        //e when wwe mint a new puppy NFT, we use the totalSupply as the tokenId
+        //q where do we increment the totalSupply?
         uint256 tokenId = totalSupply();
 
         // We use a different RNG calculate from the winnerIndex to determine rarity
-        uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100; //wrong rng
+        //report-written randomness
+
+        //q what if our transacton picks a winner and we dont like it... revert??
+        //q gas war...//@follow up
+        uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100;
         if (rarity <= COMMON_RARITY) {
             tokenIdToRarity[tokenId] = COMMON_RARITY;
         } else if (rarity <= COMMON_RARITY + RARE_RARITY) {
@@ -148,16 +181,22 @@ contract PuppyRaffle is ERC721, Ownable {
         delete players;
         raffleStartTime = block.timestamp;
         previousWinner = winner;
+        //q can we reenter somewhere?
+        //@audit what if winner is a contract and they revert in the call
         (bool success,) = winner.call{value: prizePool}("");
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
         _safeMint(winner, tokenId);
     }
 
     /// @notice this function will withdraw the fees to the feeAddress
+    //@audit any user can withdraw funds (unauthorized withdrawal) 
     function withdrawFees() external {
+        //@audit what if the totalFees is larger than the balance of the contract by someone forcing eth into the contract
+        //@audit issue with this, if overflow has happended in the totalFees, then the require will fail
         require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
         uint256 feesToWithdraw = totalFees;
         totalFees = 0;
+        //q what if the feeAddress is a contract and it reverts
         (bool success,) = feeAddress.call{value: feesToWithdraw}("");
         require(success, "PuppyRaffle: Failed to withdraw fees");
     }
@@ -166,10 +205,13 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @param newFeeAddress the new address to send fees to
     function changeFeeAddress(address newFeeAddress) external onlyOwner {
         feeAddress = newFeeAddress;
+        //are we missing an event here?
         emit FeeAddressChanged(newFeeAddress);
     }
 
     /// @notice this function will return true if the msg.sender is an active player
+    //@audit this isn't used anywhere?
+    //waste of gas
     function _isActivePlayer() internal view returns (bool) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == msg.sender) {
