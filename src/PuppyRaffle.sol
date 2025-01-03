@@ -115,7 +115,7 @@ contract PuppyRaffle is ERC721, Ownable {
         payable(msg.sender).sendValue(entranceFee);
 
         //q why not delete,and what happens if player is chosen as winner
-        //@audit, definitely a problem if the player is chosen as the winner
+        //report-written, definitely a problem if the player is chosen as the winner
         players[playerIndex] = address(0);
         emit RaffleRefunded(playerAddress);
     }
@@ -130,7 +130,7 @@ contract PuppyRaffle is ERC721, Ownable {
             }
         }
         //q what if the player is at index 0?
-        //@audit if the player is at index 0, it will return 0, which is the same as if the player is not in the array
+        //report written if the player is at index 0, it will return 0, which is the same as if the player is not in the array
         return 0;
     }
 
@@ -140,7 +140,7 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev we use a hash of on-chain data to generate the random numbers
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
-    // @audit what happens if blank user gets chosen as winner?
+    // report-written what happens if blank user gets chosen as winner?
     function selectWinner() external {
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
@@ -149,7 +149,7 @@ contract PuppyRaffle is ERC721, Ownable {
         uint256 winnerIndex =
             uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
-        //@audit //possible error cause of refund and zero address
+        //report-written //possible error cause of refund and zero address
         uint256 totalAmountCollected = players.length * entranceFee; 
         //possible precision loss
         uint256 prizePool = (totalAmountCollected * 80) / 100;
@@ -157,7 +157,7 @@ contract PuppyRaffle is ERC721, Ownable {
         //q possible arithmetic overflow, if the amouunt is larger than 2^64 - 1
         // fixes: newer solidity version,bigger uints
         //unsafe casting too
-        //@audit unsafe casting from uint256 to uint64
+        //report-written unsafe casting from uint256 to uint64
         totalFees = totalFees + uint64(fee);
 
         //e when wwe mint a new puppy NFT, we use the totalSupply as the tokenId
@@ -182,17 +182,17 @@ contract PuppyRaffle is ERC721, Ownable {
         raffleStartTime = block.timestamp;
         previousWinner = winner;
         //q can we reenter somewhere?
-        //@audit what if winner is a contract and they revert in the call
+        //report-written what if winner is a contract and they revert in the call
         (bool success,) = winner.call{value: prizePool}("");
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
         _safeMint(winner, tokenId);
     }
 
     /// @notice this function will withdraw the fees to the feeAddress
-    //@audit any user can withdraw funds (unauthorized withdrawal) 
+    //report-written any user can withdraw funds (unauthorized withdrawal) 
     function withdrawFees() external {
-        //@audit what if the totalFees is larger than the balance of the contract by someone forcing eth into the contract
-        //@audit issue with this, if overflow has happended in the totalFees, then the require will fail
+        //@report-written what if the totalFees is larger than the balance of the contract by someone forcing eth into the contract
+        //@report-written issue with this, if overflow has happended in the totalFees, then the require will fail
         require(address(this).balance == uint256(totalFees), "PuppyRaffle: There are currently players active!");
         uint256 feesToWithdraw = totalFees;
         totalFees = 0;
@@ -210,7 +210,7 @@ contract PuppyRaffle is ERC721, Ownable {
     }
 
     /// @notice this function will return true if the msg.sender is an active player
-    //@audit this isn't used anywhere?
+    //report-written this isn't used anywhere?
     //waste of gas
     function _isActivePlayer() internal view returns (bool) {
         for (uint256 i = 0; i < players.length; i++) {
